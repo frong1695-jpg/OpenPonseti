@@ -21,7 +21,8 @@ The current prototype is used to validate the sensing and data architecture befo
 | Multiple sensors running together | PASS | Integrated on one ESP32 |
 | microSD module interface | PASS | Module and code integrated |
 | microSD card writing | NOT TESTED | No dedicated microSD card currently inserted |
-| Wi-Fi transmission | NOT TESTED | Planned next |
+| Wi-Fi connection | PASS | ESP32 successfully connects to a Wi-Fi network |
+| Wi-Fi data transmission | NOT TESTED | Structured sensor data transmission is the next step |
 | Dual-foot integration | NOT TESTED | Future development step |
 
 ---
@@ -78,9 +79,11 @@ Actual CSV file writing and long-term storage have not yet been validated becaus
 The current development sequence is:
 
 1. Individual sensor testing — COMPLETE
-2. Single-foot sensor integration — COMPLETE
-3. Unified data format — IN PROGRESS
-4. microSD physical write test — PENDING
-5. Wi-Fi data transmission — NEXT
-6. Dual-foot integration — PENDING
-7. Dashboard development — FUTURE
+2. Single-foot hardware integration — COMPLETE
+3. Unified firmware integration — COMPLETE
+4. Pin-map documentation — COMPLETE
+5. Wi-Fi connection test — COMPLETE
+6. Wi-Fi sensor data transmission — NEXT
+7. microSD physical write test — PENDING
+8. Dual-foot integration — PENDING
+9. Dashboard development — FUTURE
