@@ -1,6 +1,9 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
+#include <WiFi.h>
+
+#include "secrets.h"
 
 // =====================================================
 // OpenPonseti v0.1
