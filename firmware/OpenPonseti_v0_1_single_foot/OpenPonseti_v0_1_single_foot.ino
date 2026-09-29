@@ -9,25 +9,30 @@
 // OpenPonseti v0.1
 // Single-Foot Integrated Prototype
 //
-// Sensors:
+// Hardware:
+// - ESP32 DevKit 32E
 // - FSR pressure/contact sensor
 // - MPU6050 IMU
-// - SHT3X temperature/humidity sensor
+// - SHT3X / SHT31 temperature-humidity sensor
 // - Hall sensor for buckle detection
-// - microSD module
+// - microSD SPI module
+// - Wi-Fi
 //
 // IMPORTANT:
-// This is a research prototype.
+// Research prototype only.
 // Sensor thresholds are NOT clinical thresholds.
 // =====================================================
 
 
 // =====================================================
 // PIN SETTINGS
-// Keep current tested wiring
+// Current physically tested single-foot wiring
 // =====================================================
 
-const int FSR_PIN  = 34;
+// FSR
+const int FSR_PIN = 34;
+
+// Hall sensor digital output
 const int HALL_PIN = 27;
 
 // I2C
@@ -47,6 +52,7 @@ const int SD_MOSI = 23;
 
 const uint8_t MPU6050_ADDR = 0x68;
 
+// SHT31/SHT3X may use 0x44 or 0x45
 uint8_t sht3xAddr = 0x44;
 
 
@@ -54,16 +60,17 @@ uint8_t sht3xAddr = 0x44;
 // SYSTEM STATUS
 // =====================================================
 
-bool mpuReady = false;
-bool shtReady = false;
-bool sdReady  = false;
+bool mpuReady  = false;
+bool shtReady  = false;
+bool sdReady   = false;
+bool wifiReady = false;
 
 
 // =====================================================
 // TIMING
 // =====================================================
 
-// Debug / serial output interval
+// Sensor/Serial update interval
 const unsigned long SAMPLE_INTERVAL = 500;
 
 // SD logging interval
@@ -74,8 +81,7 @@ unsigned long lastLogTime    = 0;
 
 
 // =====================================================
-// SENSOR RECORD
-// One unified data structure
+// UNIFIED SENSOR RECORD
 // =====================================================
 
 struct SensorRecord {
@@ -102,7 +108,7 @@ struct SensorRecord {
 
 
 // =====================================================
-// I2C DEVICE CHECK
+// CHECK I2C DEVICE
 // =====================================================
 
 bool i2cDeviceExists(uint8_t address) {
@@ -115,11 +121,6 @@ bool i2cDeviceExists(uint8_t address) {
 
 // =====================================================
 // READ MPU6050
-//
-// Read:
-// accelerometer
-// internal temperature registers (ignored)
-// gyroscope
 // =====================================================
 
 bool readMPU6050(
@@ -133,17 +134,18 @@ bool readMPU6050(
 
   Wire.beginTransmission(MPU6050_ADDR);
 
-  // Start at ACCEL_XOUT_H
+  // ACCEL_XOUT_H
   Wire.write(0x3B);
 
   if (Wire.endTransmission(false) != 0) {
     return false;
   }
 
-  // 14 bytes:
-  // Acc X/Y/Z = 6
-  // Temp       = 2
-  // Gyro X/Y/Z= 6
+  // Read:
+  // Acc X/Y/Z = 6 bytes
+  // Temperature = 2 bytes
+  // Gyro X/Y/Z = 6 bytes
+  // Total = 14 bytes
   Wire.requestFrom(
     MPU6050_ADDR,
     (uint8_t)14,
@@ -187,7 +189,7 @@ bool readMPU6050(
 
 
 // =====================================================
-// READ SHT3X
+// READ SHT3X / SHT31
 // =====================================================
 
 bool readSHT3X(
@@ -220,14 +222,14 @@ bool readSHT3X(
     ((uint16_t)Wire.read() << 8) |
     Wire.read();
 
-  // CRC byte
+  // Skip CRC
   Wire.read();
 
   uint16_t rawHumidity =
     ((uint16_t)Wire.read() << 8) |
     Wire.read();
 
-  // CRC byte
+  // Skip CRC
   Wire.read();
 
   temperature =
@@ -244,8 +246,10 @@ bool readSHT3X(
 
 
 // =====================================================
-// FSR PROTOTYPE STATUS
-// NOT CLINICALLY VALIDATED
+// FSR STATUS
+//
+// Temporary prototype classification only.
+// NOT clinically validated.
 // =====================================================
 
 const char* getFSRStatus(int fsrValue) {
@@ -265,11 +269,11 @@ const char* getFSRStatus(int fsrValue) {
 
 
 // =====================================================
-// BUCKLE STATUS
+// HALL / BUCKLE STATUS
 //
-// Current tested Hall behavior:
-// magnet close = 1
-// magnet far   = 0
+// Current tested behavior:
+// Magnet close = 1
+// Magnet far   = 0
 // =====================================================
 
 const char* getBuckleStatus(int hallState) {
@@ -279,6 +283,68 @@ const char* getBuckleStatus(int hallState) {
   }
 
   return "BUCKLE_OPEN";
+}
+
+
+// =====================================================
+// Wi-Fi
+// =====================================================
+
+void connectWiFi() {
+
+  Serial.println();
+  Serial.println("Checking WiFi...");
+
+  WiFi.mode(WIFI_STA);
+
+  // Do not save credentials permanently to ESP32 flash
+  WiFi.persistent(false);
+
+  WiFi.begin(
+    WIFI_SSID,
+    WIFI_PASSWORD
+  );
+
+  Serial.print("Connecting to: ");
+  Serial.println(WIFI_SSID);
+
+  unsigned long startTime = millis();
+
+  while (
+    WiFi.status() != WL_CONNECTED &&
+    millis() - startTime < 20000
+  ) {
+
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+
+    wifiReady = true;
+
+    Serial.println("WiFi connected!");
+
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    Serial.print("Signal strength: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+  }
+
+  else {
+
+    wifiReady = false;
+
+    Serial.println("WiFi connection failed.");
+
+    Serial.println(
+      "System will continue without WiFi."
+    );
+  }
 }
 
 
@@ -298,26 +364,30 @@ void initializeSD() {
     SD_CS
   );
 
-  // Lower SPI speed for prototype/breadboard stability
+  // Lower SPI speed for breadboard stability
   if (!SD.begin(SD_CS, SPI, 1000000)) {
 
     Serial.println("SD unavailable.");
+
     Serial.println(
       "System will continue without SD logging."
     );
 
     sdReady = false;
+
     return;
   }
 
   if (SD.cardType() == CARD_NONE) {
 
     Serial.println("No SD card detected.");
+
     Serial.println(
       "System will continue without SD logging."
     );
 
     sdReady = false;
+
     return;
   }
 
@@ -335,8 +405,7 @@ void initializeSD() {
   Serial.println(" MB");
 
 
-  // Create CSV if it does not exist
-
+  // Create CSV file if needed
   if (!SD.exists("/openponseti.csv")) {
 
     File file =
@@ -383,20 +452,32 @@ SensorRecord readSensors() {
 
   record.timestamp_ms = millis();
 
+
+  // -------------------------------
   // FSR
+  // -------------------------------
+
   record.fsr_raw =
     analogRead(FSR_PIN);
 
-  // Hall
+
+  // -------------------------------
+  // Hall sensor
+  // -------------------------------
+
   record.hall_raw =
     digitalRead(HALL_PIN);
 
+
+  // -------------------------------
   // MPU6050
+  // -------------------------------
+
   record.mpu_ok = false;
 
-  record.acc_x  = 0;
-  record.acc_y  = 0;
-  record.acc_z  = 0;
+  record.acc_x = 0;
+  record.acc_y = 0;
+  record.acc_z = 0;
 
   record.gyro_x = 0;
   record.gyro_y = 0;
@@ -416,7 +497,10 @@ SensorRecord readSensors() {
   }
 
 
-  // SHT3X
+  // -------------------------------
+  // SHT31
+  // -------------------------------
+
   record.sht_ok = false;
 
   record.temperature_c = 0.0;
@@ -443,26 +527,34 @@ void printCSVRecord(
   const SensorRecord &r
 ) {
 
+  // timestamp
   Serial.print(r.timestamp_ms);
   Serial.print(",");
 
+
+  // FSR
   Serial.print(r.fsr_raw);
   Serial.print(",");
 
   Serial.print(
     getFSRStatus(r.fsr_raw)
   );
+
   Serial.print(",");
 
+
+  // Hall
   Serial.print(r.hall_raw);
   Serial.print(",");
 
   Serial.print(
     getBuckleStatus(r.hall_raw)
   );
+
   Serial.print(",");
 
 
+  // SHT31
   if (r.sht_ok) {
 
     Serial.print(
@@ -480,12 +572,15 @@ void printCSVRecord(
 
   else {
 
-    Serial.print("ERROR,ERROR");
+    Serial.print(
+      "ERROR,ERROR"
+    );
   }
 
   Serial.print(",");
 
 
+  // MPU6050
   if (r.mpu_ok) {
 
     Serial.print(r.acc_x);
@@ -519,7 +614,7 @@ void printCSVRecord(
 
 
 // =====================================================
-// SD CSV OUTPUT
+// SAVE CSV TO SD
 // =====================================================
 
 void saveCSVRecord(
@@ -545,26 +640,35 @@ void saveCSVRecord(
     return;
   }
 
+
+  // timestamp
   file.print(r.timestamp_ms);
   file.print(",");
 
+
+  // FSR
   file.print(r.fsr_raw);
   file.print(",");
 
   file.print(
     getFSRStatus(r.fsr_raw)
   );
+
   file.print(",");
 
+
+  // Hall
   file.print(r.hall_raw);
   file.print(",");
 
   file.print(
     getBuckleStatus(r.hall_raw)
   );
+
   file.print(",");
 
 
+  // SHT31
   if (r.sht_ok) {
 
     file.print(
@@ -590,6 +694,7 @@ void saveCSVRecord(
   file.print(",");
 
 
+  // MPU6050
   if (r.mpu_ok) {
 
     file.print(r.acc_x);
@@ -640,7 +745,11 @@ void setup() {
   );
 
   Serial.println(
-    "OpenPonseti v0.1 - Single Foot Prototype"
+    "OpenPonseti v0.1"
+  );
+
+  Serial.println(
+    "Single-Foot Integrated Prototype"
   );
 
   Serial.println(
@@ -648,18 +757,30 @@ void setup() {
   );
 
 
+  // ===================================================
   // GPIO
-  pinMode(HALL_PIN, INPUT);
+  // ===================================================
+
+  pinMode(
+    HALL_PIN,
+    INPUT
+  );
 
 
+  // ===================================================
   // I2C
+  // ===================================================
+
   Wire.begin(
     SDA_PIN,
     SCL_PIN
   );
 
 
+  // ===================================================
   // MPU6050
+  // ===================================================
+
   if (
     i2cDeviceExists(
       MPU6050_ADDR
@@ -671,6 +792,7 @@ void setup() {
     Serial.println(
       "MPU6050 found at 0x68"
     );
+
 
     // Wake MPU6050
     Wire.beginTransmission(
@@ -691,7 +813,10 @@ void setup() {
   }
 
 
-  // SHT3X
+  // ===================================================
+  // SHT31 / SHT3X
+  // ===================================================
+
   if (
     i2cDeviceExists(0x44)
   ) {
@@ -726,9 +851,23 @@ void setup() {
   }
 
 
-  // SD
+  // ===================================================
+  // SD CARD
+  // ===================================================
+
   initializeSD();
 
+
+  // ===================================================
+  // Wi-Fi
+  // ===================================================
+
+  connectWiFi();
+
+
+  // ===================================================
+  // DATA HEADER
+  // ===================================================
 
   Serial.println();
 
@@ -763,17 +902,20 @@ void loop() {
   unsigned long now =
     millis();
 
+
+  // Sampling interval control
   if (
     now - lastSampleTime
     < SAMPLE_INTERVAL
   ) {
+
     return;
   }
 
   lastSampleTime = now;
 
 
-  // Read everything once
+  // Read all sensors once
   SensorRecord record =
     readSensors();
 
